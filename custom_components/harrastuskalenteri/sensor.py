@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Any
 import re
+import logging
 
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
@@ -12,6 +13,8 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Coor
 from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN, CHILDREN, DEFAULT_CALENDARS
+
+_LOGGER = logging.getLogger(__name__)
 
 
 def _parse_dt(value):
@@ -76,6 +79,7 @@ class HarrastusCoordinator(DataUpdateCoordinator):
     def __init__(self, hass: HomeAssistant, calendars_by_child):
         super().__init__(
             hass,
+            _LOGGER,
             name="Harrastuskalenteri",
             update_interval=timedelta(minutes=1),
         )
