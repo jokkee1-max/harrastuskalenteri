@@ -1,7 +1,7 @@
 {
   "domain": "harrastuskalenteri",
   "name": "Harrastuskalenteri",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "documentation": "https://github.com/",
   "config_flow": true,
   "iot_class": "local_polling",

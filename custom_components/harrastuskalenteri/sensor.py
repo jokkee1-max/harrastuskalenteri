@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 from typing import Any
+import re
 
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
@@ -26,21 +27,48 @@ def _event_dict(raw: dict[str, Any], calendar_entity: str, child_key: str, child
     start = raw.get("start") or raw.get("start_time")
     end = raw.get("end") or raw.get("end_time")
     desc = raw.get("description") or ""
+    location = raw.get("location") or ""
+    summary = raw.get("summary") or raw.get("message") or "Harrastus"
+
     ride = ""
+    urls = []
     for line in str(desc).splitlines():
-        if line.lower().strip().startswith(("kyyti:", "kuljetus:")):
-            ride = line.split(":", 1)[1].strip()
-            break
+        clean = line.strip()
+        low = clean.lower()
+        if low.startswith(("kyyti:", "kuljetus:")):
+            ride = clean.split(":", 1)[1].strip()
+        for url in re.findall(r"https?://[^\s<>()]+", clean):
+            urls.append(url.rstrip(".,)"))
+
+    details = ""
+    for line in str(desc).splitlines():
+        clean = line.strip()
+        if not clean:
+            continue
+        low = clean.lower()
+        if low.startswith(("pelaajat:", "kyyti:", "kuljetus:")):
+            continue
+        if re.fullmatch(r"https?://\S+", clean):
+            continue
+        if "merkitse in/out" in low:
+            continue
+        details = clean
+        break
+
     return {
         "child": child_name,
         "child_key": child_key,
-        "summary": raw.get("summary") or raw.get("message") or "Harrastus",
+        "summary": summary,
         "start": start,
         "end": end,
-        "location": raw.get("location") or "",
+        "location": location,
         "description": desc,
+        "details": details,
         "ride": ride,
+        "url": urls[0] if urls else "",
+        "urls": urls,
         "calendar": calendar_entity,
+        "calendar_name": calendar_entity.removeprefix("calendar.").replace("_", " "),
     }
 
 
