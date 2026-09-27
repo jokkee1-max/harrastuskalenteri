@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Harrastuskalenteri",
-        "description": "Valitse jokaiselle lapselle ne Google-kalenterit, joista harrastukset haetaan.",
+        "description": "Valitse lasten harrastuskalenterit.",
         "data": {
           "elias": "Elias",
           "amanda": "Amanda",
@@ -15,21 +15,6 @@
     },
     "abort": {
       "single_instance_allowed": "Harrastuskalenteri on jo määritetty."
-    }
-  },
-  "options": {
-    "step": {
-      "init": {
-        "title": "Harrastuskalenterin asetukset",
-        "description": "Muuta lapsille liitettyjä Google-kalentereita.",
-        "data": {
-          "elias": "Elias",
-          "amanda": "Amanda",
-          "lydia": "Lydia",
-          "linda": "Linda",
-          "linnea": "Linnea"
-        }
-      }
     }
   }
 }

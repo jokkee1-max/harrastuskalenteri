@@ -1,7 +1,5 @@
-"""Constants for Harrastuskalenteri."""
-
 DOMAIN = "harrastuskalenteri"
-PLATFORMS = ["sensor"]
+PLATFORMS = ["sensor", "switch"]
 
 CHILDREN = {
     "elias": "Elias",
@@ -11,4 +9,10 @@ CHILDREN = {
     "linnea": "Linnea",
 }
 
-UPDATE_INTERVAL_MINUTES = 5
+DEFAULT_CALENDARS = {
+    "elias": ["calendar.eliasfutis", "calendar.elias_golf", "calendar.elias_koris"],
+    "amanda": ["calendar.amandafutis"],
+    "lydia": ["calendar.lydiafutis", "calendar.lyyli_voimistely"],
+    "linda": ["calendar.lunat"],
+    "linnea": ["calendar.nune_voimisteou"],
+}

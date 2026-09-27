@@ -1,165 +1,221 @@
-"""Sensors for Harrastuskalenteri."""
-
 from __future__ import annotations
 
-from datetime import timedelta
-import logging
+from datetime import datetime, timedelta
 from typing import Any
 
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
-from homeassistant.helpers.update_coordinator import (
-    CoordinatorEntity,
-    DataUpdateCoordinator,
-    UpdateFailed,
-)
+from homeassistant.helpers.entity import DeviceInfo
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
-from .const import CHILDREN, DOMAIN, UPDATE_INTERVAL_MINUTES
-
-_LOGGER = logging.getLogger(__name__)
+from .const import DOMAIN, CHILDREN, DEFAULT_CALENDARS
 
 
-async def async_setup_entry(
-    hass: HomeAssistant,
-    entry: ConfigEntry,
-    async_add_entities: AddConfigEntryEntitiesCallback,
-) -> None:
-    """Set up Harrastuskalenteri sensors."""
-    coordinator = HarrastuskalenteriCoordinator(hass, entry)
-    await coordinator.async_config_entry_first_refresh()
-
-    async_add_entities(
-        HarrastusChildSensor(coordinator, entry, child_key, child_name)
-        for child_key, child_name in CHILDREN.items()
-    )
+def _parse_dt(value):
+    if not value:
+        return None
+    try:
+        return dt_util.parse_datetime(value) or dt_util.parse_date(value)
+    except Exception:
+        return None
 
 
-class HarrastuskalenteriCoordinator(DataUpdateCoordinator[dict[str, list[dict[str, Any]]]]):
-    """Fetch calendar events for all configured children."""
+def _event_dict(raw: dict[str, Any], calendar_entity: str, child_key: str, child_name: str):
+    start = raw.get("start") or raw.get("start_time")
+    end = raw.get("end") or raw.get("end_time")
+    desc = raw.get("description") or ""
+    ride = ""
+    for line in str(desc).splitlines():
+        if line.lower().strip().startswith(("kyyti:", "kuljetus:")):
+            ride = line.split(":", 1)[1].strip()
+            break
+    return {
+        "child": child_name,
+        "child_key": child_key,
+        "summary": raw.get("summary") or raw.get("message") or "Harrastus",
+        "start": start,
+        "end": end,
+        "location": raw.get("location") or "",
+        "description": desc,
+        "ride": ride,
+        "calendar": calendar_entity,
+    }
 
-    def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
-        """Initialize coordinator."""
-        self.entry = entry
+
+class HarrastusCoordinator(DataUpdateCoordinator):
+    def __init__(self, hass: HomeAssistant, calendars_by_child):
         super().__init__(
             hass,
-            _LOGGER,
-            name=DOMAIN,
-            update_interval=timedelta(minutes=UPDATE_INTERVAL_MINUTES),
+            name="Harrastuskalenteri",
+            update_interval=timedelta(minutes=1),
         )
+        self.calendars_by_child = calendars_by_child
 
-    def _configured_calendars(self) -> dict[str, list[str]]:
-        """Return configured calendars per child."""
-        return {
-            child: list(
-                self.entry.options.get(
-                    child,
-                    self.entry.data.get(child, []),
-                )
-            )
-            for child in CHILDREN
-        }
-
-    async def _async_update_data(self) -> dict[str, list[dict[str, Any]]]:
-        """Fetch today's events."""
-        child_calendars = self._configured_calendars()
-
-        all_calendars = sorted(
-            {
-                entity_id
-                for calendars in child_calendars.values()
-                for entity_id in calendars
-            }
-        )
-
-        result: dict[str, list[dict[str, Any]]] = {
-            child: [] for child in CHILDREN
-        }
-
-        if not all_calendars:
-            return result
-
+    async def _async_update_data(self):
         now = dt_util.now()
         start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        end = start + timedelta(days=1)
+        end = start + timedelta(days=7)
 
-        try:
-            response = await self.hass.services.async_call(
-                "calendar",
-                "get_events",
-                {
-                    "entity_id": all_calendars,
-                    "start_date_time": start.isoformat(),
-                    "end_date_time": end.isoformat(),
-                },
-                blocking=True,
-                return_response=True,
-            )
-        except Exception as err:
-            raise UpdateFailed(f"Kalenteritapahtumien haku epäonnistui: {err}") from err
+        all_entities = sorted({
+            ent
+            for ents in self.calendars_by_child.values()
+            for ent in (ents or [])
+            if ent
+        })
 
-        response = response or {}
+        response = {}
+        if all_entities:
+            try:
+                response = await self.hass.services.async_call(
+                    "calendar",
+                    "get_events",
+                    {
+                        "entity_id": all_entities,
+                        "start_date_time": start.isoformat(),
+                        "end_date_time": end.isoformat(),
+                    },
+                    blocking=True,
+                    return_response=True,
+                ) or {}
+            except Exception:
+                response = {}
 
-        for child, calendars in child_calendars.items():
-            events: list[dict[str, Any]] = []
+        result = {key: [] for key in CHILDREN}
 
-            for calendar_entity in calendars:
-                calendar_data = response.get(calendar_entity, {})
-                for event in calendar_data.get("events", []):
-                    events.append(
-                        {
-                            "summary": event.get("summary") or "Harrastus",
-                            "start": event.get("start"),
-                            "end": event.get("end"),
-                            "location": event.get("location") or "",
-                            "description": event.get("description") or "",
-                            "calendar": calendar_entity,
-                        }
-                    )
+        for child_key, child_name in CHILDREN.items():
+            for cal in self.calendars_by_child.get(child_key, []):
+                block = response.get(cal, {}) if isinstance(response, dict) else {}
+                events = block.get("events", []) if isinstance(block, dict) else []
+                for raw in events:
+                    result[child_key].append(_event_dict(raw, cal, child_key, child_name))
 
-            events.sort(key=lambda item: item.get("start") or "")
-            result[child] = events
+            result[child_key].sort(key=lambda e: e.get("start") or "")
 
         return result
 
 
-class HarrastusChildSensor(
-    CoordinatorEntity[HarrastuskalenteriCoordinator],
-    SensorEntity,
-):
-    """Sensor representing one child's activities today."""
+async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities):
+    src = dict(DEFAULT_CALENDARS)
+    for key in CHILDREN:
+        if key in entry.data:
+            value = entry.data.get(key) or []
+            if isinstance(value, str):
+                value = [value]
+            src[key] = value
 
-    _attr_icon = "mdi:calendar-account"
+    coordinator = HarrastusCoordinator(hass, src)
+    await coordinator.async_config_entry_first_refresh()
 
-    def __init__(
-        self,
-        coordinator: HarrastuskalenteriCoordinator,
-        entry: ConfigEntry,
-        child_key: str,
-        child_name: str,
-    ) -> None:
-        """Initialize sensor."""
+    entities = [ChildActivitiesSensor(coordinator, key, name) for key, name in CHILDREN.items()]
+    entities.append(ConflictSensor(coordinator))
+    async_add_entities(entities)
+
+
+class ChildActivitiesSensor(CoordinatorEntity, SensorEntity):
+    def __init__(self, coordinator, child_key, child_name):
         super().__init__(coordinator)
-        self._child_key = child_key
-        self._child_name = child_name
+        self.child_key = child_key
+        self.child_name = child_name
+        self._attr_unique_id = f"harrastuskalenteri_{child_key}"
         self._attr_name = f"{child_name} harrastukset"
-        self._attr_unique_id = f"{entry.entry_id}_{child_key}_harrastukset"
+        self._attr_icon = "mdi:calendar-star"
 
     @property
-    def native_value(self) -> str:
-        """Return the next event name."""
-        events = self.coordinator.data.get(self._child_key, [])
-        if not events:
-            return "Ei harrastuksia"
-        return events[0]["summary"]
+    def native_value(self):
+        return len(self._today())
+
+    def _events(self):
+        return list((self.coordinator.data or {}).get(self.child_key, []))
+
+    def _day_events(self, offset):
+        target = dt_util.now().date() + timedelta(days=offset)
+        out = []
+        for event in self._events():
+            dt = _parse_dt(event.get("start"))
+            if isinstance(dt, datetime):
+                dt = dt_util.as_local(dt)
+                d = dt.date()
+            else:
+                d = dt
+            if d == target:
+                out.append(event)
+        return out
+
+    def _today(self):
+        return self._day_events(0)
 
     @property
-    def extra_state_attributes(self) -> dict[str, Any]:
-        """Return event details."""
-        events = self.coordinator.data.get(self._child_key, [])
+    def extra_state_attributes(self):
+        events = self._events()
+        today = self._day_events(0)
+        tomorrow = self._day_events(1)
+        after_tomorrow = []
+        for day in range(2, 7):
+            after_tomorrow.extend(self._day_events(day))
         return {
-            "count": len(events),
-            "events": events,
+            "events": today,               # yhteensopivuus vanhan dashboardin kanssa
+            "today": today,
+            "tomorrow": tomorrow,
+            "upcoming": after_tomorrow,
+            "all_events": events,
+            "next_event": next((e for e in events if (_parse_dt(e.get("end")) or _parse_dt(e.get("start"))) and
+                                (_parse_dt(e.get("end")) or _parse_dt(e.get("start"))) >= dt_util.now()), None),
         }
+
+    @property
+    def device_info(self):
+        return DeviceInfo(
+            identifiers={(DOMAIN, "harrastuskalenteri")},
+            name="Harrastuskalenteri",
+            manufacturer="Custom",
+        )
+
+
+class ConflictSensor(CoordinatorEntity, SensorEntity):
+    def __init__(self, coordinator):
+        super().__init__(coordinator)
+        self._attr_unique_id = "harrastuskalenteri_ristiriidat"
+        self._attr_name = "Harrastuskalenteri ristiriidat"
+        self._attr_icon = "mdi:calendar-alert"
+
+    def _conflicts(self):
+        flat = []
+        for child_key, events in (self.coordinator.data or {}).items():
+            for e in events:
+                s = _parse_dt(e.get("start"))
+                en = _parse_dt(e.get("end")) or s
+                if isinstance(s, datetime):
+                    s = dt_util.as_local(s)
+                if isinstance(en, datetime):
+                    en = dt_util.as_local(en)
+                if not isinstance(s, datetime) or not isinstance(en, datetime):
+                    continue
+                flat.append((s, en, e))
+
+        flat.sort(key=lambda x: x[0])
+        conflicts = []
+        buffer = timedelta(minutes=30)
+
+        for i, (s1, e1, a) in enumerate(flat):
+            for s2, e2, b in flat[i+1:]:
+                if s2 > e1 + buffer:
+                    break
+                if a.get("child_key") == b.get("child_key"):
+                    continue
+                if s2 <= e1 + buffer:
+                    conflicts.append({
+                        "first": a,
+                        "second": b,
+                        "gap_minutes": round((s2 - e1).total_seconds() / 60),
+                    })
+        return conflicts
+
+    @property
+    def native_value(self):
+        return len(self._conflicts())
+
+    @property
+    def extra_state_attributes(self):
+        return {"conflicts": self._conflicts(), "buffer_minutes": 30}
