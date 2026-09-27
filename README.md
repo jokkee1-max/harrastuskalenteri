@@ -1,34 +1,25 @@
-# Harrastuskalenteri
+# Harrastuskalenteri v0.4.1
 
-Home Assistant -custom integraatio perheen harrastuskalentereiden kokoamiseen.
+## Uutta
+- Kaikki `notify.mobile_app_*` puhelimet löytyvät automaattisesti.
+- Jokaiselle puhelimelle oma ON/OFF-kytkin ilmoituksia varten.
+- Alku- ja hakumuistutusten ajat säädettävissä dashboardilta.
+- Tänään, Huomenna ja Seuraavat päivät.
+- Aikatauluristiriitojen tunnistus 30 min puskurilla.
+- Kalenteritapahtumasta talteen:
+  - otsikko
+  - alku ja loppu
+  - paikka / osoite
+  - koko kuvaus
+  - tiivistetty lisätieto
+  - `Kyyti:` / `Kuljetus:` tieto
+  - ensimmäinen URL sekä kaikki URL:t
+  - lähdekalenteri
+- MyClub-tyyppinen URL voidaan avata dashboardilta ja notifikaatiosta.
 
-## Ominaisuudet
+## Huomio
+Kalenterin koko kuvaus säilytetään attribuuteissa, mutta pelaajalistaa ei näytetä oletusnäkymässä.
 
-- Hakee valittavaksi Google Calendar -integraation kalenterientiteetit.
-- Kalentereita voi liittää lapsille: Elias, Amanda, Lydia, Linda ja Linnea.
-- Luo jokaiselle lapselle sensorin.
-- Sensorin attribuuteissa näkyvät tämän päivän tapahtumat: nimi, alku, loppu, paikka ja lähdekalenteri.
 
-## Asennus HACS:n kautta
-
-1. Tee GitHub-reposta public.
-2. HACS → kolmen pisteen valikko → Custom repositories.
-3. Lisää repo: `https://github.com/jokkee1-max/harrastuskalenteri`
-4. Tyyppi: Integration.
-5. Asenna Harrastuskalenteri.
-6. Käynnistä Home Assistant uudelleen.
-7. Settings → Devices & services → Add integration → Harrastuskalenteri.
-8. Valitse lapsille oikeat Google-kalenterit.
-
-## Sensorit
-
-Integraatio luo sensorit esimerkiksi:
-
-- `sensor.elias_harrastukset`
-- `sensor.amanda_harrastukset`
-- `sensor.lydia_harrastukset`
-- `sensor.linda_harrastukset`
-- `sensor.linnea_harrastukset`
-
-Sensorin tila on päivän ensimmäisen tapahtuman nimi tai `Ei harrastuksia`.
-Kaikki päivän tapahtumat löytyvät `events`-attribuutista.
+## v0.4.1
+- Korjattu olemassa olevan integraation lataus: config flow -versionumero palautettu arvoon 1, jolloin Home Assistant ei yritä puuttuvaa migraatiota.

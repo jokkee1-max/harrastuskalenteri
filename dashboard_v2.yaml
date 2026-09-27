@@ -1,0 +1,117 @@
+type: vertical-stack
+cards:
+  - type: markdown
+    title: Tänään
+    content: >-
+      {% set sensors = [
+        'sensor.elias_harrastukset',
+        'sensor.amanda_harrastukset',
+        'sensor.lydia_harrastukset',
+        'sensor.linda_harrastukset',
+        'sensor.linnea_harrastukset'
+      ] %}
+      {% set ns = namespace(count=0) %}
+      {% for s in sensors %}
+        {% set events = state_attr(s, 'today') or state_attr(s, 'events') or [] %}
+        {% if events | count > 0 %}
+          {% set ns.count = ns.count + (events | count) %}
+          ### {{ state_attr(s, 'friendly_name') | replace(' harrastukset','') }}
+          {% for e in events %}
+          **{{ as_datetime(e.start) | as_local | as_timestamp | timestamp_custom('%H:%M', true) }}–{{ as_datetime(e.end) | as_local | as_timestamp | timestamp_custom('%H:%M', true) }}** · {{ e.summary }}
+          {% if e.details %}{{ e.details }}{% endif %}
+          {% if e.location %}📍 {{ e.location }}{% endif %}
+          {% if e.ride %}🚗 Kyyti: **{{ e.ride }}**{% endif %}
+          {% if e.url %}[Avaa tapahtuma]({{ e.url }}){% endif %}
+          {% endfor %}
+        {% endif %}
+      {% endfor %}
+      {% if ns.count == 0 %}Ei harrastuksia tänään.{% endif %}
+
+  - type: markdown
+    title: Huomenna
+    content: >-
+      {% set sensors = [
+        'sensor.elias_harrastukset',
+        'sensor.amanda_harrastukset',
+        'sensor.lydia_harrastukset',
+        'sensor.linda_harrastukset',
+        'sensor.linnea_harrastukset'
+      ] %}
+      {% set ns = namespace(count=0) %}
+      {% for s in sensors %}
+        {% set events = state_attr(s, 'tomorrow') or [] %}
+        {% if events | count > 0 %}
+          {% set ns.count = ns.count + (events | count) %}
+          ### {{ state_attr(s, 'friendly_name') | replace(' harrastukset','') }}
+          {% for e in events %}
+          **{{ as_datetime(e.start) | as_local | as_timestamp | timestamp_custom('%H:%M', true) }}–{{ as_datetime(e.end) | as_local | as_timestamp | timestamp_custom('%H:%M', true) }}** · {{ e.summary }}
+          {% if e.details %}{{ e.details }}{% endif %}
+          {% if e.location %}📍 {{ e.location }}{% endif %}
+          {% if e.ride %}🚗 Kyyti: **{{ e.ride }}**{% endif %}
+          {% if e.url %}[Avaa tapahtuma]({{ e.url }}){% endif %}
+          {% endfor %}
+        {% endif %}
+      {% endfor %}
+      {% if ns.count == 0 %}Ei harrastuksia huomenna.{% endif %}
+
+  - type: markdown
+    title: Seuraavat päivät
+    content: >-
+      {% set sensors = [
+        'sensor.elias_harrastukset',
+        'sensor.amanda_harrastukset',
+        'sensor.lydia_harrastukset',
+        'sensor.linda_harrastukset',
+        'sensor.linnea_harrastukset'
+      ] %}
+      {% set all = [] %}
+      {% for s in sensors %}
+        {% set all = all + (state_attr(s, 'upcoming') or []) %}
+      {% endfor %}
+      {% set all = all | sort(attribute='start') %}
+      {% if all | count == 0 %}
+      Ei harrastuksia seuraavina päivinä.
+      {% else %}
+        {% for e in all %}
+        **{{ as_datetime(e.start) | as_local | as_timestamp | timestamp_custom('%a %d.%m. %H:%M', true) }}** · {{ e.child }} · {{ e.summary }}
+        {% if e.ride %} · 🚗 {{ e.ride }}{% endif %}
+        {% endfor %}
+      {% endif %}
+
+  - type: conditional
+    conditions:
+      - entity: sensor.harrastuskalenteri_ristiriidat
+        state_not: "0"
+    card:
+      type: markdown
+      title: "⚠️ Aikatauluhuomiot"
+      content: >-
+        {% set conflicts = state_attr('sensor.harrastuskalenteri_ristiriidat','conflicts') or [] %}
+        {% for c in conflicts %}
+        **{{ c.first.child }}:** {{ c.first.summary }}
+        ↔ **{{ c.second.child }}:** {{ c.second.summary }}
+        {% if c.gap_minutes >= 0 %}({{ c.gap_minutes }} min väli){% else %}(päällekkäin){% endif %}
+        {% endfor %}
+
+  - type: entities
+    title: Muistutukset
+    entities:
+      - entity: input_boolean.harrastus_notifikaatiot
+      - entity: input_number.harrastus_muistutus_ennen_alkua
+      - entity: input_number.harrastus_hakumuistutus
+
+  - type: markdown
+    title: Vastaanottajat
+    content: >-
+      {% set rec = states.switch
+         | selectattr('attributes.notify_service', 'defined')
+         | list %}
+      {% if rec | count == 0 %}
+      Mobile App -puhelimia ei löytynyt.
+      {% else %}
+      {% for s in rec %}
+      {{ '✅' if s.state == 'on' else '⬜' }} **{{ s.name }}**
+      {% endfor %}
+
+      Vastaanottajat voi kytkeä päälle/pois Harrastuskalenteri-laitteen
+      kytkimistä Home Assistantissa.
