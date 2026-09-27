@@ -37,9 +37,7 @@ async def async_setup_entry(
     )
 
 
-class HarrastuskalenteriCoordinator(
-    DataUpdateCoordinator[dict[str, list[dict[str, Any]]]]
-):
+class HarrastuskalenteriCoordinator(DataUpdateCoordinator[dict[str, list[dict[str, Any]]]]):
     """Fetch calendar events for all configured children."""
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
@@ -100,9 +98,7 @@ class HarrastuskalenteriCoordinator(
                 return_response=True,
             )
         except Exception as err:
-            raise UpdateFailed(
-                f"Kalenteritapahtumien haku epäonnistui: {err}"
-            ) from err
+            raise UpdateFailed(f"Kalenteritapahtumien haku epäonnistui: {err}") from err
 
         response = response or {}
 
@@ -147,12 +143,13 @@ class HarrastusChildSensor(
         """Initialize sensor."""
         super().__init__(coordinator)
         self._child_key = child_key
+        self._child_name = child_name
         self._attr_name = f"{child_name} harrastukset"
         self._attr_unique_id = f"{entry.entry_id}_{child_key}_harrastukset"
 
     @property
     def native_value(self) -> str:
-        """Return the first event name."""
+        """Return the next event name."""
         events = self.coordinator.data.get(self._child_key, [])
         if not events:
             return "Ei harrastuksia"

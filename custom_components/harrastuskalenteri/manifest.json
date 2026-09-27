@@ -1,11 +1,15 @@
 {
   "domain": "harrastuskalenteri",
   "name": "Harrastuskalenteri",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "documentation": "https://github.com/jokkee1-max/harrastuskalenteri",
   "issue_tracker": "https://github.com/jokkee1-max/harrastuskalenteri/issues",
-  "codeowners": ["@jokkee1-max"],
+  "codeowners": [
+    "@jokkee1-max"
+  ],
   "config_flow": true,
-  "after_dependencies": ["google"],
+  "after_dependencies": [
+    "google"
+  ],
   "iot_class": "calculated"
 }
