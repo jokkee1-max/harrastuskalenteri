@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
-import re
 import logging
+import re
 
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
@@ -20,10 +20,33 @@ _LOGGER = logging.getLogger(__name__)
 def _parse_dt(value):
     if not value:
         return None
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, date):
+        return value
     try:
         return dt_util.parse_datetime(value) or dt_util.parse_date(value)
     except Exception:
         return None
+
+
+def _to_local_date(value):
+    dt = _parse_dt(value)
+    if isinstance(dt, datetime):
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=dt_util.DEFAULT_TIME_ZONE)
+        dt = dt_util.as_local(dt)
+        return dt.date()
+    return dt
+
+
+def _to_local_datetime(value):
+    dt = _parse_dt(value)
+    if not isinstance(dt, datetime):
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=dt_util.DEFAULT_TIME_ZONE)
+    return dt_util.as_local(dt)
 
 
 def _event_dict(raw: dict[str, Any], calendar_entity: str, child_key: str, child_name: str):
@@ -94,7 +117,7 @@ class HarrastusCoordinator(DataUpdateCoordinator):
             ent
             for ents in self.calendars_by_child.values()
             for ent in (ents or [])
-            if ent
+            if ent and self.hass.states.get(ent) is not None
         })
 
         response = {}
@@ -111,7 +134,8 @@ class HarrastusCoordinator(DataUpdateCoordinator):
                     blocking=True,
                     return_response=True,
                 ) or {}
-            except Exception:
+            except Exception as err:
+                _LOGGER.exception("calendar.get_events failed: %s", err)
                 response = {}
 
         result = {key: [] for key in CHILDREN}
@@ -154,46 +178,44 @@ class ChildActivitiesSensor(CoordinatorEntity, SensorEntity):
         self._attr_name = f"{child_name} harrastukset"
         self._attr_icon = "mdi:calendar-star"
 
-    @property
-    def native_value(self):
-        return len(self._today())
-
     def _events(self):
         return list((self.coordinator.data or {}).get(self.child_key, []))
 
     def _day_events(self, offset):
         target = dt_util.now().date() + timedelta(days=offset)
-        out = []
-        for event in self._events():
-            dt = _parse_dt(event.get("start"))
-            if isinstance(dt, datetime):
-                dt = dt_util.as_local(dt)
-                d = dt.date()
-            else:
-                d = dt
-            if d == target:
-                out.append(event)
-        return out
+        return [e for e in self._events() if _to_local_date(e.get("start")) == target]
 
     def _today(self):
         return self._day_events(0)
+
+    @property
+    def native_value(self):
+        return len(self._today())
 
     @property
     def extra_state_attributes(self):
         events = self._events()
         today = self._day_events(0)
         tomorrow = self._day_events(1)
-        after_tomorrow = []
+        upcoming = []
         for day in range(2, 7):
-            after_tomorrow.extend(self._day_events(day))
+            upcoming.extend(self._day_events(day))
+
+        now = dt_util.now()
+        next_event = None
+        for e in events:
+            marker = _to_local_datetime(e.get("end")) or _to_local_datetime(e.get("start"))
+            if marker and marker >= now:
+                next_event = e
+                break
+
         return {
-            "events": today,               # yhteensopivuus vanhan dashboardin kanssa
+            "events": today,
             "today": today,
             "tomorrow": tomorrow,
-            "upcoming": after_tomorrow,
+            "upcoming": upcoming,
             "all_events": events,
-            "next_event": next((e for e in events if (_parse_dt(e.get("end")) or _parse_dt(e.get("start"))) and
-                                (_parse_dt(e.get("end")) or _parse_dt(e.get("start"))) >= dt_util.now()), None),
+            "next_event": next_event,
         }
 
     @property
@@ -205,6 +227,41 @@ class ChildActivitiesSensor(CoordinatorEntity, SensorEntity):
         )
 
 
+
+def _normalize_location(value: str) -> str:
+    """Normalize calendar location text for rough same-place comparison."""
+    if not value:
+        return ""
+    value = value.casefold().strip()
+    value = re.sub(r"\b\d{5}\b", " ", value)
+    value = re.sub(r"[^\wåäö]+", " ", value, flags=re.UNICODE)
+    value = re.sub(r"\s+", " ", value).strip()
+    return value
+
+
+def _same_location(a: str, b: str) -> bool:
+    """Return True when two location strings clearly refer to the same place."""
+    na = _normalize_location(a)
+    nb = _normalize_location(b)
+
+    if not na or not nb:
+        return False
+
+    if na == nb:
+        return True
+
+    # Example: "Ollikkalan koulu" vs
+    # "Ollikkalan koulu, Hämeenojankatu 9, 24260 Salo".
+    if len(na) >= 6 and na in nb:
+        return True
+    if len(nb) >= 6 and nb in na:
+        return True
+
+    pa = _normalize_location((a or "").split(",", 1)[0])
+    pb = _normalize_location((b or "").split(",", 1)[0])
+    return bool(pa and pb and pa == pb)
+
+
 class ConflictSensor(CoordinatorEntity, SensorEntity):
     def __init__(self, coordinator):
         super().__init__(coordinator)
@@ -213,35 +270,80 @@ class ConflictSensor(CoordinatorEntity, SensorEntity):
         self._attr_icon = "mdi:calendar-alert"
 
     def _conflicts(self):
+        today = dt_util.now().date()
+        tomorrow = today + timedelta(days=1)
+
         flat = []
         for child_key, events in (self.coordinator.data or {}).items():
             for e in events:
-                s = _parse_dt(e.get("start"))
-                en = _parse_dt(e.get("end")) or s
-                if isinstance(s, datetime):
-                    s = dt_util.as_local(s)
-                if isinstance(en, datetime):
-                    en = dt_util.as_local(en)
-                if not isinstance(s, datetime) or not isinstance(en, datetime):
+                s = _to_local_datetime(e.get("start"))
+                en = _to_local_datetime(e.get("end")) or s
+                if not s or not en:
+                    continue
+                if s.date() not in (today, tomorrow):
                     continue
                 flat.append((s, en, e))
 
         flat.sort(key=lambda x: x[0])
         conflicts = []
+        seen = set()
         buffer = timedelta(minutes=30)
 
         for i, (s1, e1, a) in enumerate(flat):
-            for s2, e2, b in flat[i+1:]:
+            for s2, e2, b in flat[i + 1:]:
+                if s2.date() != s1.date():
+                    break
                 if s2 > e1 + buffer:
                     break
                 if a.get("child_key") == b.get("child_key"):
                     continue
-                if s2 <= e1 + buffer:
-                    conflicts.append({
-                        "first": a,
-                        "second": b,
-                        "gap_minutes": round((s2 - e1).total_seconds() / 60),
-                    })
+
+                location_a = a.get("location") or ""
+                location_b = b.get("location") or ""
+
+                # Same venue is not a transport conflict.
+                # If either location is unknown, do not make a definite
+                # conflict warning from time alone.
+                if not location_a or not location_b:
+                    continue
+                if _same_location(location_a, location_b):
+                    continue
+
+                gap = round((s2 - e1).total_seconds() / 60)
+                kind = "overlap" if gap < 0 else "tight"
+                key = (
+                    s1.isoformat(),
+                    e1.isoformat(),
+                    a.get("child_key"),
+                    a.get("summary"),
+                    s2.isoformat(),
+                    e2.isoformat(),
+                    b.get("child_key"),
+                    b.get("summary"),
+                )
+                if key in seen:
+                    continue
+                seen.add(key)
+
+                conflicts.append({
+                    "date": s1.date().isoformat(),
+                    "kind": kind,
+                    "gap_minutes": gap,
+                    "first": {
+                        "child": a.get("child"),
+                        "summary": a.get("summary"),
+                        "start": s1.isoformat(),
+                        "end": e1.isoformat(),
+                        "location": a.get("location") or "",
+                    },
+                    "second": {
+                        "child": b.get("child"),
+                        "summary": b.get("summary"),
+                        "start": s2.isoformat(),
+                        "end": e2.isoformat(),
+                        "location": b.get("location") or "",
+                    },
+                })
         return conflicts
 
     @property
@@ -250,4 +352,8 @@ class ConflictSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def extra_state_attributes(self):
-        return {"conflicts": self._conflicts(), "buffer_minutes": 30}
+        return {
+            "conflicts": self._conflicts(),
+            "buffer_minutes": 30,
+            "scope": "today_and_tomorrow",
+        }
