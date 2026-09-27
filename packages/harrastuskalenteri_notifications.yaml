@@ -1,0 +1,139 @@
+input_boolean:
+  harrastus_notifikaatiot:
+    name: Harrastusnotifikaatiot
+    icon: mdi:bell
+
+input_number:
+  harrastus_muistutus_ennen_alkua:
+    name: Muistutus ennen alkua
+    min: 5
+    max: 180
+    step: 5
+    unit_of_measurement: min
+    initial: 60
+    icon: mdi:timer-sand
+
+  harrastus_hakumuistutus:
+    name: Hakumuistutus ennen loppua
+    min: 5
+    max: 90
+    step: 5
+    unit_of_measurement: min
+    initial: 20
+    icon: mdi:car-clock
+
+automation:
+  - id: harrastuskalenteri_alkumuistutus
+    alias: Harrastuskalenteri - muistutus ennen alkua
+    mode: parallel
+    max: 20
+    trigger:
+      - platform: time_pattern
+        minutes: "*"
+    condition:
+      - condition: state
+        entity_id: input_boolean.harrastus_notifikaatiot
+        state: "on"
+    action:
+      - variables:
+          sensors:
+            - sensor.elias_harrastukset
+            - sensor.amanda_harrastukset
+            - sensor.lydia_harrastukset
+            - sensor.linda_harrastukset
+            - sensor.linnea_harrastukset
+          notice_min: "{{ states('input_number.harrastus_muistutus_ennen_alkua') | int(60) }}"
+          recipients: >-
+            {{ states.switch
+               | selectattr('state', 'eq', 'on')
+               | selectattr('attributes.notify_service', 'defined')
+               | map(attribute='attributes.notify_service')
+               | list }}
+      - repeat:
+          for_each: "{{ sensors }}"
+          sequence:
+            - variables:
+                evs: "{{ state_attr(repeat.item, 'all_events') or [] }}"
+            - repeat:
+                for_each: "{{ evs }}"
+                sequence:
+                  - variables:
+                      ev: "{{ repeat.item }}"
+                      start_ts: "{{ as_timestamp(as_datetime(ev.start), 0) }}"
+                      target_ts: "{{ start_ts - notice_min * 60 }}"
+                      diff: "{{ target_ts - as_timestamp(now()) }}"
+                  - condition: template
+                    value_template: "{{ 0 <= diff < 60 }}"
+                  - repeat:
+                      for_each: "{{ recipients }}"
+                      sequence:
+                        - action: "{{ repeat.item }}"
+                          data:
+                            title: "{{ ev.child }} – {{ ev.summary }}"
+                            message: >-
+                              Alkaa klo
+                              {{ as_datetime(ev.start) | as_local | as_timestamp | timestamp_custom('%H:%M', true) }}
+                              {% if ev.details %} • {{ ev.details }}{% endif %}
+                              {% if ev.location %} • {{ ev.location }}{% endif %}
+                            data:
+                              {% if ev.url %}
+                              clickAction: "{{ ev.url }}"
+                              url: "{{ ev.url }}"
+                              {% endif %}
+
+  - id: harrastuskalenteri_hakumuistutus
+    alias: Harrastuskalenteri - hakumuistutus
+    mode: parallel
+    max: 20
+    trigger:
+      - platform: time_pattern
+        minutes: "*"
+    condition:
+      - condition: state
+        entity_id: input_boolean.harrastus_notifikaatiot
+        state: "on"
+    action:
+      - variables:
+          sensors:
+            - sensor.elias_harrastukset
+            - sensor.amanda_harrastukset
+            - sensor.lydia_harrastukset
+            - sensor.linda_harrastukset
+            - sensor.linnea_harrastukset
+          notice_min: "{{ states('input_number.harrastus_hakumuistutus') | int(20) }}"
+          recipients: >-
+            {{ states.switch
+               | selectattr('state', 'eq', 'on')
+               | selectattr('attributes.notify_service', 'defined')
+               | map(attribute='attributes.notify_service')
+               | list }}
+      - repeat:
+          for_each: "{{ sensors }}"
+          sequence:
+            - variables:
+                evs: "{{ state_attr(repeat.item, 'all_events') or [] }}"
+            - repeat:
+                for_each: "{{ evs }}"
+                sequence:
+                  - variables:
+                      ev: "{{ repeat.item }}"
+                      end_ts: "{{ as_timestamp(as_datetime(ev.end), 0) }}"
+                      target_ts: "{{ end_ts - notice_min * 60 }}"
+                      diff: "{{ target_ts - as_timestamp(now()) }}"
+                  - condition: template
+                    value_template: "{{ end_ts > 0 and 0 <= diff < 60 }}"
+                  - repeat:
+                      for_each: "{{ recipients }}"
+                      sequence:
+                        - action: "{{ repeat.item }}"
+                          data:
+                            title: "Haku – {{ ev.child }}"
+                            message: >-
+                              {{ ev.summary }} päättyy klo
+                              {{ as_datetime(ev.end) | as_local | as_timestamp | timestamp_custom('%H:%M', true) }}
+                              {% if ev.location %} • {{ ev.location }}{% endif %}
+                            data:
+                              {% if ev.url %}
+                              clickAction: "{{ ev.url }}"
+                              url: "{{ ev.url }}"
+                              {% endif %}
