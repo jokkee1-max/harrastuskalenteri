@@ -154,9 +154,12 @@ class HarrastusCoordinator(DataUpdateCoordinator):
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities):
     src = dict(DEFAULT_CALENDARS)
+    merged = dict(entry.data or {})
+    merged.update(entry.options or {})
+
     for key in CHILDREN:
-        if key in entry.data:
-            value = entry.data.get(key) or []
+        if key in merged:
+            value = merged.get(key) or []
             if isinstance(value, str):
                 value = [value]
             src[key] = value
