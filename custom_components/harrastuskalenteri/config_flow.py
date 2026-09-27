@@ -1,6 +1,7 @@
 import voluptuous as vol
 
 from homeassistant import config_entries
+from homeassistant.core import callback
 from homeassistant.helpers import selector
 
 from .const import DOMAIN, CHILDREN, DEFAULT_CALENDARS
@@ -37,14 +38,12 @@ class HarrastuskalenteriConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
     @staticmethod
+    @callback
     def async_get_options_flow(config_entry):
-        return HarrastuskalenteriOptionsFlow(config_entry)
+        return HarrastuskalenteriOptionsFlow()
 
 
 class HarrastuskalenteriOptionsFlow(config_entries.OptionsFlow):
-    def __init__(self, config_entry):
-        self.config_entry = config_entry
-
     async def async_step_init(self, user_input=None):
         current = dict(DEFAULT_CALENDARS)
         current.update(self.config_entry.data or {})
@@ -52,7 +51,7 @@ class HarrastuskalenteriOptionsFlow(config_entries.OptionsFlow):
 
         if user_input is not None:
             return self.async_create_entry(
-                title="Kalenterit",
+                title="",
                 data=user_input,
             )
 
